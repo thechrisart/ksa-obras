@@ -1,8 +1,8 @@
 // Dados do projeto Supabase (Project Settings → API).
 // A chave "anon public" pode ficar aqui: o acesso é protegido pelo login e pelas regras do setup.sql.
 window.KSA_CONFIG = {
-  SUPABASE_URL: "",
-  SUPABASE_ANON_KEY: "",
+  SUPABASE_URL: "https://vovcceybjhalwukwaxid.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_UxqvGeEYX2G2tl56U9Rb_w_TUKGHDmA",
 
   // Moeda dos valores e do invoice.
   CURRENCY: "USD",
