@@ -651,6 +651,9 @@ const TYPE_EN = { Pintura: "Painting", Drywall: "Drywall", Reparos: "Repair", Pi
 const today = () => new Date().toISOString().slice(0, 10);
 const addDays = (d, n) => { const x = new Date(d + "T12:00"); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
 
+// Último nome de empresa digitado no invoice desta obra (fica salvo neste aparelho).
+function lastCompany(p) { try { return localStorage.getItem("ksa_co_" + p.id) || ""; } catch { return ""; } }
+
 function nextInvoiceNumber() {
   const y = new Date().getFullYear(), pre = `INV-${y}-`;
   const max = S.projects.map(p => p.invoice_number || "").filter(n => n.startsWith(pre))
@@ -678,6 +681,7 @@ function openInvoice(p) {
     <p class="meta">${esc(p.client)} · total ${money(jobTotal(p))} (trabalho ${money(p.labor_value)} + material ${money(matsTotal(p))})</p>
     <div class="fields">
       ${S.companiesOn ? companyPicker("i_company", p.company_id, "Cobrar de (Bill to)", "Cliente da obra: " + (p.client || "")) : ""}
+      <label class="f">Empresa (Bill to)<input id="i_coname" value="${esc(lastCompany(p))}" placeholder="Empresa para quem fez o trabalho"></label>
       <label class="f">Número<input id="i_num" value="${esc(nextInvoiceNumber())}"></label>
       <label class="f">Idioma do PDF<select id="i_lang"><option value="en">English</option><option value="pt">Português</option></select></label>
       <label class="f">Data<input id="i_date" type="date" value="${d0}"></label>
@@ -700,7 +704,10 @@ function openInvoice(p) {
     e.preventDefault();
     const opt = { number: $("#i_num", el).value.trim() || nextInvoiceNumber(), lang: $("#i_lang", el).value,
       date: $("#i_date", el).value || d0, due: $("#i_due", el).value, detail: $("#i_detail", el).checked, notes: $("#i_notes", el).value.trim(),
-      company: S.companiesOn ? S.companies.find(c => c.id === $("#i_company", el).value) || null : null };
+      company: (S.companiesOn && S.companies.find(c => c.id === $("#i_company", el).value)) || null };
+    const coName = $("#i_coname", el).value.trim();
+    if (!opt.company && coName) opt.company = { name: coName };
+    try { localStorage.setItem("ksa_co_" + p.id, coName); } catch {}
     $("#igo", el).disabled = true; $("#igo", el).textContent = "Gerando…";
     try {
       await buildInvoicePdf(p, opt);
