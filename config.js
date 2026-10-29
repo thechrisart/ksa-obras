@@ -5,7 +5,7 @@ window.KSA_CONFIG = {
   SUPABASE_ANON_KEY: "sb_publishable_UxqvGeEYX2G2tl56U9Rb_w_TUKGHDmA",
 
   // Endereço do script do Google Drive (Implantar → App da Web). Vazio = fotos ficam no Supabase.
-  DRIVE_URL: "",
+  DRIVE_URL: "https://script.google.com/macros/s/AKfycbyyggQw99CFvJhJGaIAaCPT7hG1jjiCEl0gew8JiGifyNuubD52dNZ3RLnNdPWq3F5t/exec",
 
   // Moeda dos valores e do invoice.
   CURRENCY: "USD",
