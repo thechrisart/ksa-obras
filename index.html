@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KSA Grand Construction</title>
+<meta name="description" content="Diário de reformas da KSA Grand Construction: obras, contatos, fotos e vídeos.">
+<meta name="theme-color" content="#ff5722">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="KSA Obras">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top"><div class="wrap bar">
+  <button class="brand" id="home" aria-label="Voltar para a lista de obras"><img class="logo" src="icons/mark.jpg" alt="Logo KSA Grand Construction"><span class="name"><span class="n1">KSA Grand Construction</span><span class="n2">Diário de reformas</span></span></button>
+  <span class="spacer"></span>
+  <span class="who" id="who"></span>
+  <button class="btn primary" id="newBtn" hidden>+ Nova obra</button>
+  <button class="btn ghost" id="logout" hidden>Sair</button>
+</div></header>
+
+<main class="wrap" id="app">
+  <div class="empty" style="margin-top:20px"><h2>Carregando…</h2><p>Conectando ao banco de dados da empresa.</p></div>
+</main>
+
+<input type="file" id="fileCam" accept="image/*" capture="environment" hidden>
+<input type="file" id="fileVid" accept="video/*" capture="environment" hidden>
+<input type="file" id="fileLib" accept="image/*,video/*" multiple hidden>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
