@@ -45,25 +45,12 @@ function toast(msg) {
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 })();
 
-async function setUser(u) {
-  S.user = u; S.role = null;
-  $("#newBtn").hidden = true; $("#teamBtn").hidden = true;
-  $("#logout").hidden = !u; $("#who").textContent = u?.email || "";
+function setUser(u) {
+  S.user = u;
+  $("#newBtn").hidden = !u; $("#logout").hidden = !u; $("#who").textContent = u?.email || "";
   if (!u) { S.view = "list"; S.projects = []; S.loaded = false; return renderLogin(); }
-  const { data: me, error: merr } = await S.sb.from("members").select("role").eq("user_id", u.id).maybeSingle();
-  if (S.user?.id !== u.id) return;
-  // Before setup-equipe.sql runs there is no members table: keep the old behavior (any login sees the jobs).
-  S.role = merr ? "legacy" : (me?.role || "pending");
-  if (S.role === "legacy") { $("#newBtn").hidden = false; S.view = "list"; loadProjects(); return subscribe(); }
-  if (S.role !== "member" && S.role !== "admin") return renderPending();
-  $("#newBtn").hidden = false; $("#teamBtn").hidden = S.role !== "admin";
-  if (S.role === "admin") refreshPendingBadge();
   S.view = "list";
   loadProjects();
-  subscribe();
-}
-
-function subscribe() {
   if (S.channel) return;
   S.channel = S.sb.channel("obras")
     .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => loadProjects())
@@ -74,108 +61,22 @@ function subscribe() {
     .subscribe();
 }
 
-function renderLogin(msg = "", mode = "in", ok = "") {
-  const up = mode === "up";
-  app.innerHTML = `<form class="login" id="lf" novalidate>
+function renderLogin(msg = "") {
+  app.innerHTML = `<form class="login" id="lf">
     <img src="icons/mark.jpg" alt="">
-    <div class="seg tabs" role="tablist">
-      <button type="button" role="tab" data-mode="in" aria-pressed="${!up}">Entrar</button>
-      <button type="button" role="tab" data-mode="up" aria-pressed="${up}">Criar conta</button>
-    </div>
-    <h2>${up ? "Criar conta" : "Entrar"}</h2>
-    <p>${up ? "Depois do cadastro, um administrador da KSA Grand Construction precisa aprovar seu acesso." : "Use seu e-mail e senha da KSA Grand Construction."}</p>
-    ${up ? `<label class="f">Nome<input id="l_name" autocomplete="name" required></label>` : ""}
-    <label class="f">E-mail<input id="l_email" type="email" autocomplete="${up ? "email" : "username"}" required></label>
-    <label class="f">Senha${up ? " (mínimo 6 caracteres)" : ""}<input id="l_pass" type="password" autocomplete="${up ? "new-password" : "current-password"}" required></label>
-    ${up ? `<label class="f">Repita a senha<input id="l_pass2" type="password" autocomplete="new-password" required></label>` : ""}
+    <h2>Entrar</h2>
+    <p>Use o e-mail e a senha cadastrados pela KSA Grand Construction.</p>
+    <label class="f">E-mail<input id="l_email" type="email" autocomplete="username" required></label>
+    <label class="f">Senha<input id="l_pass" type="password" autocomplete="current-password" required></label>
     <p class="err" id="lerr" ${msg ? "" : "hidden"}>${esc(msg)}</p>
-    <p class="okmsg" ${ok ? "" : "hidden"}>${esc(ok)}</p>
-    <button class="btn primary" type="submit" id="lbtn">${up ? "Criar conta" : "Entrar"}</button>
+    <button class="btn primary" type="submit" id="lbtn">Entrar</button>
   </form>`;
-  app.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => renderLogin("", b.dataset.mode)));
-  // Sign-up only makes sense once the approval table exists; otherwise a new account would see everything.
-  if (S.signupOk === undefined) {
-    S.sb.from("members").select("user_id").limit(1).then(({ error, status }) => {
-      S.signupOk = !error && status < 400; if (!S.signupOk) $(".tabs")?.setAttribute("hidden", "");
-    });
-  } else if (!S.signupOk) $(".tabs").hidden = true;
   $("#lf").addEventListener("submit", async e => {
     e.preventDefault();
-    const email = $("#l_email").value.trim(), pass = $("#l_pass").value;
-    if (!up) {
-      $("#lbtn").disabled = true;
-      const { error } = await S.sb.auth.signInWithPassword({ email, password: pass });
-      if (error) renderLogin(/confirm/i.test(error.message) ? "Confirme seu e-mail pelo link que enviamos antes de entrar."
-        : /Invalid/.test(error.message) ? "E-mail ou senha incorretos." : "Não foi possível entrar: " + error.message);
-      return;
-    }
-    const name = $("#l_name").value.trim();
-    if (!name || !email) return renderLogin("Preencha nome e e-mail.", "up");
-    if (pass.length < 6) return renderLogin("A senha precisa ter pelo menos 6 caracteres.", "up");
-    if (pass !== $("#l_pass2").value) return renderLogin("As senhas não são iguais.", "up");
     $("#lbtn").disabled = true;
-    const { data, error } = await S.sb.auth.signUp({ email, password: pass,
-      options: { data: { name }, emailRedirectTo: location.origin + location.pathname } });
-    if (error) return renderLogin(/registered|exists/i.test(error.message) ? "Este e-mail já tem conta. Use Entrar."
-      : /disabled|not allowed/i.test(error.message) ? "O cadastro pelo site está desligado. Peça acesso ao administrador."
-      : "Não foi possível criar a conta: " + error.message, "up");
-    if (!data.session) renderLogin("", "in", "Conta criada. Abra o e-mail que enviamos e clique no link de confirmação. Depois aguarde a aprovação.");
+    const { error } = await S.sb.auth.signInWithPassword({ email: $("#l_email").value.trim(), password: $("#l_pass").value });
+    if (error) renderLogin(error.message.includes("Invalid") ? "E-mail ou senha incorretos." : "Não foi possível entrar: " + error.message);
   });
-}
-
-function renderPending() {
-  const blocked = S.role === "blocked";
-  app.innerHTML = `<div class="empty" style="margin-top:20px">
-    <img src="icons/mark.jpg" alt="" style="height:64px;border-radius:10px">
-    <h2>${blocked ? "Acesso não liberado" : "Aguardando aprovação"}</h2>
-    <p>${blocked ? "Seu acesso foi recusado por um administrador. Fale com a KSA Grand Construction."
-      : `Sua conta <b>${esc(S.user.email)}</b> foi criada. Um administrador da KSA Grand Construction precisa aprovar seu acesso antes de você ver as obras.`}</p>
-    ${blocked ? "" : `<button class="btn primary" id="recheck">Verificar de novo</button>`}
-  </div>`;
-  $("#recheck")?.addEventListener("click", () => setUser(S.user));
-}
-
-/* ---------- equipe (admin) ---------- */
-const ROLES = { pending: "Pendente", member: "Membro", admin: "Administrador", blocked: "Recusado" };
-async function refreshPendingBadge() {
-  const { count } = await S.sb.from("members").select("user_id", { count: "exact", head: true }).eq("role", "pending");
-  $("#teamBtn").textContent = count ? `Equipe (${count})` : "Equipe";
-}
-
-async function openTeam() {
-  const el = document.createElement("div"); el.className = "sheet";
-  el.innerHTML = `<div class="panel"><h2>Equipe</h2><p class="meta">Quem cria conta pelo site aparece aqui como pendente.</p><div id="tlist">Carregando…</div>
-    <div class="actions"><button class="btn" id="tclose">Fechar</button></div></div>`;
-  document.body.appendChild(el);
-  const close = () => { el.remove(); refreshPendingBadge(); };
-  el.addEventListener("click", e => { if (e.target === el) close(); });
-  $("#tclose", el).addEventListener("click", close);
-  const order = { pending: 0, admin: 1, member: 2, blocked: 3 };
-  async function draw() {
-    const { data, error } = await S.sb.from("members").select("*").order("created_at", { ascending: true });
-    if (error) return $("#tlist", el).innerHTML = `<p class="err">${esc(error.message)}</p>`;
-    data.sort((a, b) => order[a.role] - order[b.role]);
-    $("#tlist", el).innerHTML = `<div class="team">${data.map(m => {
-      const self = m.user_id === S.user.id;
-      const btns = self ? `<span class="meta">você</span>` :
-        m.role === "pending" ? `<button class="btn primary" data-set="member">Aprovar</button><button class="btn danger" data-set="blocked">Recusar</button>` :
-        m.role === "member" ? `<button class="btn" data-set="admin">Tornar admin</button><button class="btn danger" data-set="blocked">Remover acesso</button>` :
-        m.role === "admin" ? `<button class="btn" data-set="member">Tirar admin</button>` :
-        `<button class="btn" data-set="member">Liberar acesso</button>`;
-      return `<div class="trow" data-id="${esc(m.user_id)}">
-        <div class="tinfo"><b>${esc(m.name || m.email)}</b><span class="meta">${esc(m.email)} · desde ${fmtDate(m.created_at)}</span></div>
-        <span class="chip role-${m.role}">${ROLES[m.role]}</span><div class="tbtns">${btns}</div></div>`;
-    }).join("")}</div>`;
-    el.querySelectorAll("[data-set]").forEach(b => b.addEventListener("click", async () => {
-      b.disabled = true;
-      const id = b.closest(".trow").dataset.id;
-      const { error } = await S.sb.from("members").update({ role: b.dataset.set }).eq("user_id", id);
-      if (error) { b.disabled = false; return toast("Não foi possível alterar: " + error.message); }
-      toast(b.dataset.set === "member" ? "Acesso liberado" : b.dataset.set === "admin" ? "Agora é administrador" : "Acesso removido");
-      draw();
-    }));
-  }
-  draw();
 }
 
 /* ---------- data ---------- */
@@ -743,4 +644,3 @@ async function buildInvoicePdf(p, o) {
 $("#home").addEventListener("click", () => { if (S.user && S.view !== "list") goList(); });
 $("#newBtn").addEventListener("click", () => openForm());
 $("#logout").addEventListener("click", () => S.sb.auth.signOut());
-$("#teamBtn").addEventListener("click", openTeam);
