@@ -13,6 +13,13 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const fmtDate = t => t ? new Date(t).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "";
 const fmtTime = t => t ? new Date(t).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
 const url = path => S.urls.get(path)?.url || "";
+const CFG = window.KSA_CONFIG || {};
+const num = v => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
+const round2 = n => Math.round(n * 100) / 100;
+const money = n => new Intl.NumberFormat(CFG.LOCALE || "en-US", { style: "currency", currency: CFG.CURRENCY || "USD" }).format(n || 0);
+const matsOf = p => Array.isArray(p.materials) ? p.materials : [];
+const matsTotal = p => round2(matsOf(p).reduce((s, m) => s + num(m.qty) * num(m.price), 0));
+const jobTotal = p => round2(num(p.labor_value) + matsTotal(p));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
 
 function toast(msg) {
@@ -157,6 +164,7 @@ function card(p) {
       <h3>${esc(p.client || "Sem nome")}</h3>
       <div class="meta">${esc([p.address, p.city].filter(Boolean).join(" · "))}</div>
       <div class="meta">${p.media_count || 0} registros · desde ${fmtDate(p.created_at)}</div>
+      ${jobTotal(p) ? `<div class="meta"><b style="color:var(--ink)">${money(jobTotal(p))}</b> investimento total</div>` : ""}
     </div></button>`;
 }
 
@@ -193,6 +201,20 @@ function renderDetail() {
     </div>
 
     <section class="log">
+      <div class="logbar"><h2>Valores</h2><button class="btn tape" id="invBtn">Criar invoice (PDF)</button></div>
+      ${matsOf(p).length ? `<div class="tablewrap"><table class="mtable">
+        <thead><tr><th>Material</th><th class="r">Qtd.</th><th class="r">Preço unit.</th><th class="r">Total</th></tr></thead>
+        <tbody>${matsOf(p).map(m => `<tr><td>${esc(m.desc)}</td><td class="r">${esc(m.qty)}</td><td class="r">${money(m.price)}</td><td class="r">${money(num(m.qty) * num(m.price))}</td></tr>`).join("")}</tbody>
+      </table></div>` : `<p class="meta">Nenhum material cadastrado. Use "Editar dados" para adicionar.</p>`}
+      <div class="totals">
+        <div><span>Material</span><b>${money(matsTotal(p))}</b></div>
+        <div><span>Trabalho</span><b>${money(p.labor_value)}</b></div>
+        <div class="grand"><span>Investimento total</span><b>${money(jobTotal(p))}</b></div>
+      </div>
+      ${p.invoice_number ? `<p class="meta">Último invoice: ${esc(p.invoice_number)} · ${esc(p.invoice_date ? new Date(p.invoice_date + "T12:00").toLocaleDateString("pt-BR") : "")}</p>` : ""}
+    </section>
+
+    <section class="log">
       <div class="logbar"><h2>Registro da obra</h2><span class="meta">${S.media.length} fotos e vídeos</span></div>
       <div class="upl">
         <span class="seg" role="group" aria-label="Etapa dos próximos envios">
@@ -213,6 +235,7 @@ function renderDetail() {
 
   $("#back").addEventListener("click", goList);
   $("#edit").addEventListener("click", () => openForm(p));
+  $("#invBtn").addEventListener("click", () => openInvoice(p));
   app.querySelectorAll("[data-copy]").forEach(b => b.addEventListener("click", () => copyText(b.dataset.copy, b)));
   app.querySelectorAll("[data-stage]").forEach(b => b.addEventListener("click", () => { S.stage = b.dataset.stage; renderDetail(); }));
   $("#bCam").addEventListener("click", () => $("#fileCam").click());
@@ -250,7 +273,16 @@ function openForm(p) {
       <label class="f">E-mail<input id="f_email" type="email" value="${esc(p.email)}"></label>
       <label class="f">Data de início<input id="f_start" type="date" value="${esc(p.start_date)}"></label>
       <label class="f">Status<select id="f_status">${Object.entries(STATUS).map(([k, v]) => `<option value="${k}" ${p.status === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
-      <label class="f full">Observações<textarea id="f_notes" rows="3" placeholder="Cômodos, cores, medidas, materiais…">${esc(p.notes)}</textarea></label>
+      <label class="f full">Observações<textarea id="f_notes" rows="3" placeholder="Cômodos, cores, medidas…">${esc(p.notes)}</textarea></label>
+    </div>
+    <div class="money-box">
+      <h3>Valores</h3>
+      <label class="f">Valor do trabalho (mão de obra)<input id="f_labor" type="number" inputmode="decimal" step="0.01" min="0" value="${p.labor_value ?? ""}" placeholder="0.00"></label>
+      <div class="f">Material gasto</div>
+      <div class="mat mat-head" aria-hidden="true"><span>Material</span><span>Qtd.</span><span>Preço unit.</span><span>Total</span><span></span></div>
+      <div id="mats" class="mats"></div>
+      <button type="button" class="btn" id="addMat">+ Adicionar material</button>
+      <div class="totals" id="ftot"></div>
     </div>
     <datalist id="citylist">${[...new Set(S.projects.map(x => x.city).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join("")}</datalist>
     <p class="err" id="ferr" hidden></p>
@@ -266,6 +298,33 @@ function openForm(p) {
   $("#f_client", el).focus();
   const err = m => { const e = $("#ferr", el); e.textContent = m; e.hidden = !m; };
 
+  const matsEl = $("#mats", el);
+  const readMats = () => [...matsEl.querySelectorAll(".mat")].map(r => ({
+    desc: $(".m_desc", r).value.trim(), qty: num($(".m_qty", r).value), price: num($(".m_price", r).value) }))
+    .filter(m => m.desc || m.price);
+  const updateTotals = () => {
+    matsEl.querySelectorAll(".mat").forEach(r => $(".m_total", r).textContent = money(num($(".m_qty", r).value) * num($(".m_price", r).value)));
+    const draft = { labor_value: num($("#f_labor", el).value), materials: readMats() };
+    $("#ftot", el).innerHTML = `<div><span>Material</span><b>${money(matsTotal(draft))}</b></div>
+      <div><span>Trabalho</span><b>${money(draft.labor_value)}</b></div>
+      <div class="grand"><span>Investimento total</span><b>${money(jobTotal(draft))}</b></div>`;
+  };
+  const addMatRow = (m = { desc: "", qty: 1, price: "" }) => {
+    const r = document.createElement("div"); r.className = "mat";
+    r.innerHTML = `<input class="m_desc" placeholder="Ex.: Tinta acrílica 5 gal" value="${esc(m.desc)}" aria-label="Material">
+      <input class="m_qty" type="number" inputmode="decimal" step="any" min="0" value="${esc(m.qty)}" aria-label="Quantidade">
+      <input class="m_price" type="number" inputmode="decimal" step="0.01" min="0" value="${esc(m.price)}" placeholder="0.00" aria-label="Preço unitário">
+      <span class="m_total"></span>
+      <button type="button" class="m_del" aria-label="Remover material">×</button>`;
+    $(".m_del", r).addEventListener("click", () => { r.remove(); updateTotals(); });
+    matsEl.appendChild(r);
+  };
+  matsOf(p).forEach(addMatRow);
+  if (!matsOf(p).length) addMatRow();
+  $("#addMat", el).addEventListener("click", () => { addMatRow(); updateTotals(); matsEl.lastElementChild.querySelector(".m_desc").focus(); });
+  el.addEventListener("input", e => { if (e.target.closest(".money-box")) updateTotals(); });
+  updateTotals();
+
   $("#fdel", el)?.addEventListener("click", function () {
     if (this.dataset.armed) {
       this.disabled = true;
@@ -278,7 +337,8 @@ function openForm(p) {
     e.preventDefault();
     const v = id => $("#" + id, el).value.trim();
     const data = { client: v("f_client"), city: v("f_city"), type: v("f_type"), address: v("f_address"), contact: v("f_contact"),
-      phone: v("f_phone"), email: v("f_email"), start_date: v("f_start") || null, status: v("f_status"), notes: v("f_notes") };
+      phone: v("f_phone"), email: v("f_email"), start_date: v("f_start") || null, status: v("f_status"), notes: v("f_notes"),
+      labor_value: round2(num(v("f_labor"))), materials: readMats() };
     if (!data.client) return err("Informe o nome do cliente ou da obra.");
     if (!data.city) return err("Informe a cidade.");
     $("#fsave", el).disabled = true;
@@ -413,6 +473,172 @@ function openViewer(mid) {
     });
   }
   draw();
+}
+
+/* ---------- invoice ---------- */
+const INV_TXT = {
+  en: { title: "INVOICE", billTo: "BILL TO", date: "Invoice date", due: "Due date", service: "Service", site: "Job site",
+    desc: "Description", qty: "Qty", unit: "Unit price", amount: "Amount", labor: t => `${t} services - labor`,
+    materials: "Materials", matsSub: "Materials subtotal", laborSub: "Labor", total: "TOTAL DUE", notes: "Notes",
+    thanks: "Thank you for your business!", locale: "en-US" },
+  pt: { title: "INVOICE", billTo: "COBRAR DE", date: "Data", due: "Vencimento", service: "Serviço", site: "Local da obra",
+    desc: "Descrição", qty: "Qtd.", unit: "Preço unit.", amount: "Valor", labor: t => `Mão de obra - ${t.toLowerCase()}`,
+    materials: "Materiais", matsSub: "Subtotal de materiais", laborSub: "Mão de obra", total: "TOTAL A PAGAR", notes: "Observações",
+    thanks: "Obrigado pela preferência!", locale: "pt-BR" },
+};
+const TYPE_EN = { Pintura: "Painting", Drywall: "Drywall", Reparos: "Repair", Piso: "Flooring", Banheiro: "Bathroom", Cozinha: "Kitchen",
+  "Elétrica": "Electrical", "Hidráulica": "Plumbing", Outro: "Renovation" };
+const today = () => new Date().toISOString().slice(0, 10);
+const addDays = (d, n) => { const x = new Date(d + "T12:00"); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+
+function nextInvoiceNumber() {
+  const y = new Date().getFullYear(), pre = `INV-${y}-`;
+  const max = S.projects.map(p => p.invoice_number || "").filter(n => n.startsWith(pre))
+    .reduce((m, n) => Math.max(m, parseInt(n.slice(pre.length), 10) || 0), 0);
+  return pre + String(max + 1).padStart(4, "0");
+}
+
+function loadScript(src) {
+  return new Promise((ok, bad) => {
+    if (document.querySelector(`script[src="${src}"]`)) return ok();
+    const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => bad(new Error("não carregou " + src));
+    document.head.appendChild(s);
+  });
+}
+async function imgData(src) {
+  const b = await (await fetch(src)).blob();
+  return new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
+}
+
+function openInvoice(p) {
+  const el = document.createElement("div"); el.className = "sheet";
+  const d0 = today();
+  el.innerHTML = `<form class="panel" id="invf" novalidate>
+    <h2>Criar invoice</h2>
+    <p class="meta">${esc(p.client)} · total ${money(jobTotal(p))} (trabalho ${money(p.labor_value)} + material ${money(matsTotal(p))})</p>
+    <div class="fields">
+      <label class="f">Número<input id="i_num" value="${esc(nextInvoiceNumber())}"></label>
+      <label class="f">Idioma do PDF<select id="i_lang"><option value="en">English</option><option value="pt">Português</option></select></label>
+      <label class="f">Data<input id="i_date" type="date" value="${d0}"></label>
+      <label class="f">Vencimento<input id="i_due" type="date" value="${addDays(d0, 15)}"></label>
+      <label class="f full" style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:.95rem;color:var(--ink)">
+        <input id="i_detail" type="checkbox" checked style="width:auto;min-height:0"> Mostrar cada material no invoice</label>
+      <label class="f full">Observações / forma de pagamento<textarea id="i_notes" rows="3" placeholder="Ex.: Pagamento via Zelle ou cheque. 50% no início, 50% na entrega."></textarea></label>
+    </div>
+    <p class="err" id="ierr" hidden></p>
+    <div class="actions">
+      <button type="button" class="btn" id="icancel">Cancelar</button>
+      <button type="submit" class="btn primary" id="igo">Baixar PDF</button>
+    </div></form>`;
+  document.body.appendChild(el);
+  const close = () => el.remove();
+  el.addEventListener("click", e => { if (e.target === el) close(); });
+  $("#icancel", el).addEventListener("click", close);
+  $("#invf", el).addEventListener("submit", async e => {
+    e.preventDefault();
+    const opt = { number: $("#i_num", el).value.trim() || nextInvoiceNumber(), lang: $("#i_lang", el).value,
+      date: $("#i_date", el).value || d0, due: $("#i_due", el).value, detail: $("#i_detail", el).checked, notes: $("#i_notes", el).value.trim() };
+    $("#igo", el).disabled = true; $("#igo", el).textContent = "Gerando…";
+    try {
+      await buildInvoicePdf(p, opt);
+      await S.sb.from("projects").update({ invoice_number: opt.number, invoice_date: opt.date }).eq("id", p.id);
+      close(); toast("Invoice " + opt.number + " gerado"); loadProjects();
+    } catch (x) {
+      const er = $("#ierr", el); er.textContent = "Não foi possível gerar o PDF: " + x.message; er.hidden = false;
+      $("#igo", el).disabled = false; $("#igo", el).textContent = "Baixar PDF";
+    }
+  });
+}
+
+async function buildInvoicePdf(p, o) {
+  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js");
+  const T = INV_TXT[o.lang];
+  const fmt = n => new Intl.NumberFormat(T.locale, { style: "currency", currency: CFG.CURRENCY || "USD" }).format(n || 0);
+  const fdate = d => d ? new Date(d + "T12:00").toLocaleDateString(T.locale, { year: "numeric", month: "short", day: "2-digit" }) : "-";
+  const co = CFG.COMPANY || {};
+  const type = o.lang === "en" ? (TYPE_EN[p.type] || p.type || "Renovation") : (p.type || "Reforma");
+  const ORANGE = [255, 87, 34], INK = [22, 32, 43], MUTED = [91, 102, 114];
+
+  const doc = new window.jspdf.jsPDF({ unit: "pt", format: "letter" });
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 40;
+
+  // Header band
+  doc.setFillColor(...ORANGE); doc.rect(0, 0, W, 112, "F");
+  try { doc.addImage(await imgData("icons/mark.jpg"), "JPEG", M, 24, 106, 63); } catch {}
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(17); doc.text(co.name || "KSA Grand Construction, Inc.", M + 120, 48);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+  [co.address, [co.phone, co.email].filter(Boolean).join("  ·  ")].filter(Boolean).forEach((l, i) => doc.text(l, M + 120, 64 + i * 13));
+  doc.setFont("helvetica", "bold"); doc.setFontSize(26); doc.text(T.title, W - M, 52, { align: "right" });
+  doc.setFont("helvetica", "normal"); doc.setFontSize(11); doc.text("# " + o.number, W - M, 72, { align: "right" });
+
+  // Bill to + meta
+  let y = 148;
+  doc.setTextColor(...ORANGE); doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.text(T.billTo, M, y);
+  doc.setTextColor(...INK); doc.setFontSize(12); doc.text(p.client || "", M, y + 17);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+  const billLines = [p.contact, p.address, p.city, p.phone, p.email].filter(Boolean);
+  billLines.forEach((l, i) => doc.text(doc.splitTextToSize(l, 250)[0], M, y + 33 + i * 14));
+
+  const meta = [[T.date, fdate(o.date)], [T.due, fdate(o.due)], [T.service, type], [T.site, [p.address, p.city].filter(Boolean).join(", ") || "-"]];
+  meta.forEach(([k, v], i) => {
+    const yy = y + i * 18;
+    doc.setTextColor(...MUTED); doc.setFontSize(9); doc.text(k, W - M - 210, yy);
+    doc.setTextColor(...INK); doc.setFontSize(10); doc.text(doc.splitTextToSize(v, 130)[0], W - M, yy, { align: "right" });
+  });
+  y = Math.max(y + 33 + billLines.length * 14, y + meta.length * 18) + 16;
+
+  // Line items
+  const labor = num(p.labor_value), mats = matsOf(p), matSum = matsTotal(p);
+  const body = [];
+  if (labor) body.push([T.labor(type), "1", fmt(labor), fmt(labor)]);
+  if (o.detail) mats.forEach(m => body.push([m.desc || T.materials, String(m.qty), fmt(m.price), fmt(num(m.qty) * num(m.price))]));
+  else if (matSum) body.push([T.materials, "1", fmt(matSum), fmt(matSum)]);
+  if (!body.length) body.push([T.labor(type), "1", fmt(0), fmt(0)]);
+
+  doc.autoTable({
+    startY: y, margin: { left: M, right: M },
+    head: [[T.desc, T.qty, T.unit, T.amount]], body,
+    styles: { font: "helvetica", fontSize: 10, textColor: INK, cellPadding: 7, lineColor: [213, 218, 224], lineWidth: 0.5 },
+    headStyles: { fillColor: INK, textColor: 255, fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [246, 247, 249] },
+    columnStyles: { 1: { halign: "right", cellWidth: 50 }, 2: { halign: "right", cellWidth: 95 }, 3: { halign: "right", cellWidth: 95 } },
+  });
+  y = doc.lastAutoTable.finalY + 18;
+
+  // Totals
+  if (y > H - 160) { doc.addPage(); y = 60; }
+  const tx = W - M - 230;
+  [[T.matsSub, fmt(matSum)], [T.laborSub, fmt(labor)]].forEach(([k, v]) => {
+    doc.setTextColor(...MUTED); doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.text(k, tx, y);
+    doc.setTextColor(...INK); doc.text(v, W - M, y, { align: "right" }); y += 18;
+  });
+  doc.setFillColor(...ORANGE); doc.rect(tx - 10, y - 6, W - M - tx + 10, 30, "F");
+  doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(12);
+  doc.text(T.total, tx, y + 13); doc.text(fmt(jobTotal(p)), W - M - 8, y + 13, { align: "right" });
+  y += 50;
+
+  // Notes
+  if (o.notes) {
+    if (y > H - 110) { doc.addPage(); y = 60; }
+    doc.setTextColor(...ORANGE); doc.setFontSize(9); doc.text(T.notes.toUpperCase(), M, y);
+    doc.setTextColor(...INK); doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+    doc.text(doc.splitTextToSize(o.notes, W - 2 * M), M, y + 15);
+  }
+
+  // Footer
+  const pages = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(...ORANGE); doc.setLineWidth(2); doc.line(M, H - 50, W - M, H - 50);
+    doc.setTextColor(...MUTED); doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+    doc.text(T.thanks, M, H - 34);
+    doc.text([co.name || "KSA Grand Construction, Inc.", co.email].filter(Boolean).join("  ·  "), W - M, H - 34, { align: "right" });
+  }
+
+  const safe = s => String(s || "").replace(/[\\/:*?"<>|]+/g, "").trim();
+  doc.save(`${safe(o.number)} - ${safe(p.client)}.pdf`);
 }
 
 $("#home").addEventListener("click", () => { if (S.user && S.view !== "list") goList(); });

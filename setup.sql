@@ -15,6 +15,10 @@ create table if not exists public.projects (
   notes text,
   media_count int not null default 0,
   cover_path text,
+  labor_value numeric(12,2) not null default 0,
+  materials jsonb not null default '[]'::jsonb,
+  invoice_number text,
+  invoice_date date,
   created_by uuid references auth.users(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz
@@ -32,6 +36,12 @@ create table if not exists public.media (
   created_by uuid references auth.users(id),
   created_at timestamptz not null default now()
 );
+-- Valores e invoice (seguro rodar de novo em banco já criado).
+alter table public.projects add column if not exists labor_value numeric(12,2) not null default 0;
+alter table public.projects add column if not exists materials jsonb not null default '[]'::jsonb;
+alter table public.projects add column if not exists invoice_number text;
+alter table public.projects add column if not exists invoice_date date;
+
 create index if not exists media_project_idx on public.media(project_id, created_at);
 
 -- Só quem faz login (contas criadas por você) lê e grava.

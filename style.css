@@ -154,3 +154,30 @@ img { max-width: 100% }
 .who { color: var(--muted); font-size: .85rem; max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 @media (max-width: 560px) { .who { display: none } }
 code { background: var(--chip); padding: 1px 5px; border-radius: 4px; font-size: .9em }
+
+/* Valores, materiais e invoice */
+.money-box { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px }
+.money-box h3 { margin: 0; font-family: var(--display); font-size: 1.25rem; text-transform: uppercase; letter-spacing: .04em }
+.mats { display: grid; gap: 6px }
+.mat { display: grid; grid-template-columns: minmax(0, 1fr) 64px 96px 84px 36px; gap: 6px; align-items: center }
+.mat input { padding: 8px; min-height: 40px }
+.mat .m_total { text-align: right; font-variant-numeric: tabular-nums; font-size: .9rem; color: var(--muted) }
+.mat .m_del { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; height: 40px; cursor: pointer; color: var(--danger); font-size: 1.2rem }
+.mat-head { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600 }
+.mat-head span:nth-child(n+2) { text-align: right }
+@media (max-width: 520px) {
+  .mat { grid-template-columns: minmax(0, 1fr) 56px 84px 36px; }
+  .mat .m_desc { grid-column: 1 / -1 }
+  .mat .m_total { display: none }
+  .mat-head { display: none }
+}
+.totals { display: grid; gap: 4px; justify-self: end; width: min(340px, 100%); margin-left: auto; font-variant-numeric: tabular-nums; padding-top: 8px }
+.totals div { display: flex; justify-content: space-between; gap: 16px; color: var(--muted) }
+.totals b { color: var(--ink) }
+.totals .grand { border-top: 2px solid var(--ink); padding-top: 6px; margin-top: 2px; color: var(--ink); font-weight: 600; font-size: 1.1rem }
+.totals .grand b { color: var(--tape) }
+.tablewrap { overflow-x: auto; margin-top: 12px }
+.mtable { width: 100%; border-collapse: collapse; font-size: .95rem; font-variant-numeric: tabular-nums; background: var(--surface) }
+.mtable th, .mtable td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left }
+.mtable th { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
+.mtable .r { text-align: right; white-space: nowrap }

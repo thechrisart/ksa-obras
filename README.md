@@ -1,6 +1,7 @@
 # KSA Grand Construction · Diário de reformas
 
 Cadastro de obras (cliente, cidade, endereço, contato) com fotos e vídeos de **antes, durante e depois** de cada reforma.
+Cada obra guarda o valor do trabalho e o material gasto, calcula o investimento total e gera **invoice em PDF** (inglês ou português).
 
 - Site: https://thechrisart.github.io/ksa-obras/
 - Funciona no celular e no computador. No celular dá para instalar na tela inicial:
@@ -15,7 +16,8 @@ O site guarda os dados no [Supabase](https://supabase.com), que tem plano gratui
 2. Abra **SQL Editor → New query**, cole todo o conteúdo de [`setup.sql`](setup.sql) e clique em **Run**.
 3. Em **Authentication → Sign In / Providers**, desligue **Allow new users to sign up**. Assim só entra quem você cadastrar.
 4. Em **Authentication → Users → Add user → Create new user**, crie o login de cada pessoa da equipe (e-mail e senha). Marque **Auto Confirm User**.
-5. Em **Project Settings → API** copie a **Project URL** e a chave **anon public** e coloque em [`config.js`](config.js).
+5. Em `config.js`, preencha endereço e telefone da empresa (aparecem no invoice) e a moeda, se não for dólar.
+6. Em **Project Settings → API** copie a **Project URL** e a chave **anon public** e coloque em [`config.js`](config.js).
 
 A chave "anon public" é feita para ficar no site. Os dados só abrem para quem fizer login, pelas regras do `setup.sql`.
 Nunca coloque a chave `service_role` neste repositório.
