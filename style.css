@@ -182,3 +182,20 @@ code { background: var(--chip); padding: 1px 5px; border-radius: 4px; font-size:
 .mtable th { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
 .mtable .r { text-align: right; white-space: nowrap }
 .viewer .stagebox iframe { width: min(100%, 960px); height: 100%; border: 0; background: #000 }
+
+/* Remover foto/vídeo direto na grade */
+.thumbwrap { position: relative; min-width: 0 }
+.thumbwrap .thumb { width: 100% }
+.tdel { position: absolute; top: 6px; right: 6px; min-width: 32px; height: 32px; padding: 0 8px; border-radius: 16px; border: 0;
+  background: rgba(0,0,0,.65); color: #fff; font: 600 1.1rem/1 var(--body); cursor: pointer }
+.tdel:hover { background: var(--danger) }
+.tdel.armed { background: var(--danger); font-size: .8rem }
+.tdel:focus-visible { outline: 3px solid var(--tape); outline-offset: 2px }
+
+/* Empresa contratante */
+.copick { display: flex; gap: 6px; flex-wrap: wrap }
+.copick select { flex: 1 1 200px; min-width: 0; width: auto }
+div.f { display: grid; gap: 4px; font-size: .8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; min-width: 0 }
+div.f select { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink); font-size: 1rem }
+div.f .btn { text-transform: none; letter-spacing: 0; color: var(--ink); font-size: .95rem }
+.card .co b { color: var(--ink) }

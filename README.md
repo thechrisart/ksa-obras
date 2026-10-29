@@ -50,3 +50,8 @@ com as subpastas **Antes**, **Durante** e **Depois**. As fotos e vídeos enviado
 "Qualquer pessoa" é necessário para o site conseguir chamar o script. O próprio script recusa quem não estiver logado no site.
 Os arquivos enviados ficam com "qualquer pessoa com o link pode ver", para o site conseguir mostrar as fotos.
 Fotos enviadas antes de ligar o Drive continuam no Supabase.
+
+## Empresas contratantes
+
+Para cadastrar a empresa que contrata o serviço (e cobrá-la no invoice), rode uma vez no Supabase
+**SQL Editor → New query** o conteúdo de [`setup-empresas.sql`](setup-empresas.sql) e clique em **Run**.

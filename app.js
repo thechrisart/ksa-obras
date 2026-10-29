@@ -8,7 +8,7 @@ const CHUNK = 4 * 1024 * 1024;  // múltiplo de 256 KB, exigido pelo Drive
 const SIGN_TTL = 60 * 60 * 24 * 7;
 
 const S = { sb: null, user: null, projects: [], loaded: false, view: "list", pid: null, media: [],
-  q: "", fStatus: "", fCity: "", stage: "durante", busy: false, urls: new Map(), folders: {} };
+  q: "", fStatus: "", fCity: "", stage: "durante", busy: false, urls: new Map(), folders: {}, companies: [], companiesOn: false, fCompany: "" };
 const app = document.getElementById("app");
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -121,6 +121,69 @@ async function uploadToDrive(blob, p, stage, fileName, onPart) {
   throw new Error("o Drive não confirmou o arquivo");
 }
 
+/* ---------- empresas contratantes ---------- */
+const companyOf = p => S.companies.find(c => c.id === p?.company_id) || null;
+
+async function loadCompanies() {
+  const { data, error, status } = await S.sb.from("companies").select("*").order("name");
+  S.companiesOn = !error && status < 400;
+  S.companies = data || [];
+}
+
+const companyOptions = (sel, none = "Nenhuma (cobrar o cliente da obra)") =>
+  `<option value="">${none}</option>` + S.companies.map(c => `<option value="${esc(c.id)}" ${c.id === sel ? "selected" : ""}>${esc(c.name)}</option>`).join("");
+
+// Abre o cadastro de empresa; onSaved recebe a empresa salva.
+function openCompanyForm(co, onSaved) {
+  const edit = !!co; co = co || {};
+  const el = document.createElement("div"); el.className = "sheet"; el.style.zIndex = 25;
+  el.innerHTML = `<form class="panel" novalidate>
+    <h2>${edit ? "Editar empresa" : "Nova empresa contratante"}</h2>
+    <p class="meta">A empresa que contrata e paga o serviço. Ela aparece como "Bill to" no invoice.</p>
+    <div class="fields">
+      <label class="f full">Nome da empresa<input id="c_name" value="${esc(co.name)}" placeholder="Ex.: Boston Home Builders LLC"></label>
+      <label class="f">Contato<input id="c_contact" value="${esc(co.contact)}" placeholder="Quem cuida do pagamento"></label>
+      <label class="f">Telefone<input id="c_phone" type="tel" value="${esc(co.phone)}"></label>
+      <label class="f">E-mail<input id="c_email" type="email" value="${esc(co.email)}"></label>
+      <label class="f">Tax ID / EIN (opcional)<input id="c_taxid" value="${esc(co.tax_id)}"></label>
+      <label class="f full">Endereço<input id="c_address" value="${esc(co.address)}" placeholder="Rua, número, cidade, estado, ZIP"></label>
+    </div>
+    <p class="err" hidden></p>
+    <div class="actions"><button type="button" class="btn" data-x>Cancelar</button><button class="btn primary" type="submit">${edit ? "Salvar" : "Cadastrar empresa"}</button></div>
+  </form>`;
+  document.body.appendChild(el);
+  const close = () => el.remove();
+  $("[data-x]", el).addEventListener("click", close);
+  $("#c_name", el).focus();
+  $("form", el).addEventListener("submit", async e => {
+    e.preventDefault();
+    const v = id => $("#" + id, el).value.trim();
+    const data = { name: v("c_name"), contact: v("c_contact"), phone: v("c_phone"), email: v("c_email"), tax_id: v("c_taxid"), address: v("c_address") };
+    const err = $(".err", el);
+    if (!data.name) { err.textContent = "Informe o nome da empresa."; err.hidden = false; return; }
+    $("button[type=submit]", el).disabled = true;
+    const q = edit ? S.sb.from("companies").update(data).eq("id", co.id) : S.sb.from("companies").insert(data);
+    const { data: row, error } = await q.select().single();
+    if (error) { err.textContent = "Não foi possível salvar: " + error.message; err.hidden = false; $("button[type=submit]", el).disabled = false; return; }
+    await loadCompanies();
+    close(); toast(edit ? "Empresa atualizada" : "Empresa cadastrada");
+    onSaved?.(row);
+  });
+}
+
+// Liga um <select> de empresa aos botões "+ Nova" e "Editar".
+function wireCompanyPicker(root, selId, none) {
+  const sel = $("#" + selId, root), editBtn = $("[data-coedit]", root);
+  const sync = () => { if (editBtn) editBtn.hidden = !sel.value; };
+  sel.addEventListener("change", sync); sync();
+  $("[data-conew]", root).addEventListener("click", () => openCompanyForm(null, row => { sel.innerHTML = companyOptions(row.id, none); sync(); sel.dispatchEvent(new Event("change")); }));
+  editBtn?.addEventListener("click", () => openCompanyForm(S.companies.find(c => c.id === sel.value), row => { sel.innerHTML = companyOptions(row.id, none); sync(); sel.dispatchEvent(new Event("change")); }));
+}
+
+const companyPicker = (selId, selected, label, none) => `<div class="f full">${label}
+  <div class="copick"><select id="${selId}">${companyOptions(selected, none)}</select>
+  <button type="button" class="btn" data-coedit hidden>Editar</button><button type="button" class="btn" data-conew>+ Nova empresa</button></div></div>`;
+
 /* ---------- data ---------- */
 async function sign(paths) {
   const now = Date.now();
@@ -135,6 +198,7 @@ async function loadProjects() {
   const { data, error } = await S.sb.from("projects").select("*").order("created_at", { ascending: false });
   if (error) { S.loaded = true; app.innerHTML = `<div class="empty" style="margin-top:20px"><h2>Erro ao carregar obras</h2><p>${esc(error.message)}</p></div>`; return; }
   S.projects = data; S.loaded = true;
+  await loadCompanies();
   await sign(data.map(p => p.cover_path));
   if (S.view === "detail" && !S.projects.find(p => p.id === S.pid)) return goList();
   render();
@@ -160,6 +224,7 @@ function renderList() {
   const list = S.projects.filter(p =>
     (!S.fStatus || p.status === S.fStatus) &&
     (!S.fCity || (p.city || "").trim() === S.fCity) &&
+    (!S.fCompany || (S.fCompany === "-" ? !p.company_id : p.company_id === S.fCompany)) &&
     (!q || [p.client, p.city, p.address, p.contact, p.phone, p.type].join(" ").toLowerCase().includes(q)));
   const count = k => S.projects.filter(p => p.status === k).length;
   const totalMedia = S.projects.reduce((n, p) => n + (p.media_count || 0), 0);
@@ -180,6 +245,9 @@ function renderList() {
         ${Object.entries(STATUS).map(([k, v]) => `<option value="${k}" ${S.fStatus === k ? "selected" : ""}>${v}</option>`).join("")}</select>
       <select id="fCity" aria-label="Filtrar por cidade"><option value="">Todas as cidades</option>
         ${cities.map(c => `<option ${S.fCity === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+      ${S.companiesOn && S.companies.length ? `<select id="fCompany" aria-label="Filtrar por empresa"><option value="">Todas as empresas</option>
+        ${S.companies.map(c => `<option value="${esc(c.id)}" ${S.fCompany === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+        <option value="-" ${S.fCompany === "-" ? "selected" : ""}>Sem empresa</option></select>` : ""}
     </div>
     <div class="stats">
       <span><b>${S.projects.length}</b> obras</span>
@@ -194,6 +262,7 @@ function renderList() {
   $("#q").addEventListener("input", e => { S.q = e.target.value; const pos = e.target.selectionStart; renderList(); const n = $("#q"); n.focus(); n.setSelectionRange(pos, pos); });
   $("#fStatus").addEventListener("change", e => { S.fStatus = e.target.value; renderList(); });
   $("#fCity").addEventListener("change", e => { S.fCity = e.target.value; renderList(); });
+  $("#fCompany")?.addEventListener("change", e => { S.fCompany = e.target.value; renderList(); });
   app.querySelectorAll(".card").forEach(c => c.addEventListener("click", () => openDetail(c.dataset.id)));
 }
 
@@ -204,6 +273,7 @@ function card(p) {
     <div class="body">
       <div class="row"><span class="chip">${esc(STATUS[st])}</span>${p.type ? `<span class="chip">${esc(p.type)}</span>` : ""}</div>
       <h3>${esc(p.client || "Sem nome")}</h3>
+      ${companyOf(p) ? `<div class="meta co">Para: <b>${esc(companyOf(p).name)}</b></div>` : ""}
       <div class="meta">${esc([p.address, p.city].filter(Boolean).join(" · "))}</div>
       <div class="meta">${p.media_count || 0} registros · desde ${fmtDate(p.created_at)}</div>
       ${jobTotal(p) ? `<div class="meta"><b style="color:var(--ink)">${money(jobTotal(p))}</b> investimento total</div>` : ""}
@@ -239,6 +309,7 @@ function renderDetail() {
     <div class="info">
       <div><div class="k">Cidade</div><div class="v">${esc(p.city || "—")}</div></div>
       <div><div class="k">Endereço</div><div class="v">${esc(p.address || "—")}${mapsQ ? ` <a href="https://www.google.com/maps/search/?api=1&query=${mapsQ}" target="_blank" rel="noopener">Mapa ↗</a>` : ""}</div></div>
+      ${S.companiesOn ? `<div><div class="k">Empresa contratante</div><div class="v">${companyOf(p) ? esc(companyOf(p).name) : "—"}</div></div>` : ""}
       <div><div class="k">Contato</div><div class="v">${esc(p.contact || "—")}</div></div>
       <div><div class="k">Telefone</div><div class="v">${phone ? `<a href="tel:${esc(phone.replace(/[^\d+]/g, ""))}">${esc(phone)}</a><button class="copy" data-copy="${esc(phone)}">Copiar</button>` : "—"}</div></div>
       <div><div class="k">E-mail</div><div class="v">${email ? `<a href="mailto:${esc(email)}">${esc(email)}</a><button class="copy" data-copy="${esc(email)}">Copiar</button>` : "—"}</div></div>
@@ -288,15 +359,36 @@ function renderDetail() {
   $("#bVid").addEventListener("click", () => $("#fileVid").click());
   $("#bLib").addEventListener("click", () => $("#fileLib").click());
   app.querySelectorAll(".thumb").forEach(t => t.addEventListener("click", () => openViewer(t.dataset.id)));
+  app.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
+    if (!b.classList.contains("armed")) {
+      b.classList.add("armed"); b.textContent = "Remover?";
+      setTimeout(() => { if (b.isConnected && !b.disabled) { b.classList.remove("armed"); b.textContent = "×"; } }, 4000);
+      return;
+    }
+    b.disabled = true;
+    const m = S.media.find(x => x.id === b.dataset.del);
+    try { await deleteMedia(m); toast("Removido"); renderDetail(); }
+    catch (e) { b.disabled = false; toast("Não foi possível remover: " + e.message); }
+  }));
 }
 
 function thumb(m) {
   const isVid = m.kind === "video";
-  return `<button class="thumb" data-id="${esc(m.id)}" aria-label="${esc(m.caption || (isVid ? "Vídeo" : "Foto"))}">
+  return `<div class="thumbwrap"><button class="thumb" data-id="${esc(m.id)}" aria-label="${esc(m.caption || (isVid ? "Vídeo" : "Foto"))}">
     ${isVid && isDrive(m.path) ? `<img src="${esc(url(m.path))}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span class="play">▶</span>`
       : isVid ? `<video src="${esc(url(m.path))}#t=0.1" preload="metadata" muted playsinline></video><span class="play">▶</span>`
       : `<img src="${esc(url(m.path))}" alt="" loading="lazy">`}
-    <span class="tag">${esc(m.caption ? m.caption.slice(0, 24) : fmtDate(m.created_at))}</span></button>`;
+    <span class="tag">${esc(m.caption ? m.caption.slice(0, 24) : fmtDate(m.created_at))}</span></button>
+    <button class="tdel" data-del="${esc(m.id)}" aria-label="Remover ${isVid ? "vídeo" : "foto"}" title="Remover">×</button></div>`;
+}
+
+async function deleteMedia(m) {
+  const { error } = await S.sb.from("media").delete().eq("id", m.id);
+  if (error) throw error;
+  if (isDrive(m.path)) driveCall("trash", { fileId: driveId(m.path) }).catch(e => toast("Google Drive: " + e.message));
+  else await S.sb.storage.from(BUCKET).remove([m.path]);
+  S.media = S.media.filter(x => x.id !== m.id);
+  await syncProjectSummary(S.pid);
 }
 
 async function copyText(text, btn) {
@@ -315,6 +407,7 @@ function openForm(p) {
       <label class="f">Cidade<input id="f_city" required value="${esc(p.city)}" list="citylist" placeholder="Ex.: Orlando"></label>
       <label class="f">Tipo de serviço<select id="f_type">${TYPES.map(t => `<option ${p.type === t ? "selected" : ""}>${t}</option>`).join("")}</select></label>
       <label class="f full">Endereço<input id="f_address" value="${esc(p.address)}" placeholder="Rua, número, bairro, CEP"></label>
+      ${S.companiesOn ? companyPicker("f_company", p.company_id, "Empresa contratante (quem contratou e paga)", "Nenhuma") : ""}
       <label class="f">Contato<input id="f_contact" value="${esc(p.contact)}" placeholder="Nome de quem atende"></label>
       <label class="f">Telefone<input id="f_phone" type="tel" value="${esc(p.phone)}" placeholder="(000) 000-0000"></label>
       <label class="f">E-mail<input id="f_email" type="email" value="${esc(p.email)}"></label>
@@ -345,6 +438,7 @@ function openForm(p) {
   $("#f_client", el).focus();
   const err = m => { const e = $("#ferr", el); e.textContent = m; e.hidden = !m; };
 
+  if (S.companiesOn) wireCompanyPicker(el, "f_company", "Nenhuma");
   const matsEl = $("#mats", el);
   const readMats = () => [...matsEl.querySelectorAll(".mat")].map(r => ({
     desc: $(".m_desc", r).value.trim(), qty: num($(".m_qty", r).value), price: num($(".m_price", r).value) }))
@@ -386,6 +480,7 @@ function openForm(p) {
     const data = { client: v("f_client"), city: v("f_city"), type: v("f_type"), address: v("f_address"), contact: v("f_contact"),
       phone: v("f_phone"), email: v("f_email"), start_date: v("f_start") || null, status: v("f_status"), notes: v("f_notes"),
       labor_value: round2(num(v("f_labor"))), materials: readMats() };
+    if (S.companiesOn) data.company_id = v("f_company") || null;
     if (!data.client) return err("Informe o nome do cliente ou da obra.");
     if (!data.city) return err("Informe a cidade.");
     $("#fsave", el).disabled = true;
@@ -530,13 +625,9 @@ function openViewer(mid) {
     $("#vdel", el).addEventListener("click", async function () {
       if (!this.dataset.armed) { this.dataset.armed = 1; this.textContent = "Confirmar exclusão"; this.classList.add("solid"); return; }
       this.disabled = true;
-      const { error } = await S.sb.from("media").delete().eq("id", m.id);
-      if (error) { this.disabled = false; return toast("Não foi possível excluir: " + error.message); }
-      if (isDrive(m.path)) driveCall("trash", { fileId: driveId(m.path) }).catch(e => toast("Google Drive: " + e.message));
-      else await S.sb.storage.from(BUCKET).remove([m.path]);
+      try { await deleteMedia(m); } catch (e) { this.disabled = false; return toast("Não foi possível excluir: " + e.message); }
       toast("Registro excluído");
-      S.media = S.media.filter(x => x.id !== m.id);
-      await syncProjectSummary(S.pid); renderDetail();
+      renderDetail();
       if (!S.media.length) return close();
       idx = Math.min(idx, S.media.length - 1); draw();
     });
@@ -548,11 +639,11 @@ function openViewer(mid) {
 const INV_TXT = {
   en: { title: "INVOICE", billTo: "BILL TO", date: "Invoice date", due: "Due date", service: "Service", site: "Job site",
     desc: "Description", qty: "Qty", unit: "Unit price", amount: "Amount", labor: t => `${t} services - labor`,
-    materials: "Materials", matsSub: "Materials subtotal", laborSub: "Labor", total: "TOTAL DUE", notes: "Notes",
+    client: "Client", materials: "Materials", matsSub: "Materials subtotal", laborSub: "Labor", total: "TOTAL DUE", notes: "Notes",
     thanks: "Thank you for your business!", locale: "en-US" },
   pt: { title: "INVOICE", billTo: "COBRAR DE", date: "Data", due: "Vencimento", service: "Serviço", site: "Local da obra",
     desc: "Descrição", qty: "Qtd.", unit: "Preço unit.", amount: "Valor", labor: t => `Mão de obra - ${t.toLowerCase()}`,
-    materials: "Materiais", matsSub: "Subtotal de materiais", laborSub: "Mão de obra", total: "TOTAL A PAGAR", notes: "Observações",
+    client: "Cliente", materials: "Materiais", matsSub: "Subtotal de materiais", laborSub: "Mão de obra", total: "TOTAL A PAGAR", notes: "Observações",
     thanks: "Obrigado pela preferência!", locale: "pt-BR" },
 };
 const TYPE_EN = { Pintura: "Painting", Drywall: "Drywall", Reparos: "Repair", Piso: "Flooring", Banheiro: "Bathroom", Cozinha: "Kitchen",
@@ -586,6 +677,7 @@ function openInvoice(p) {
     <h2>Criar invoice</h2>
     <p class="meta">${esc(p.client)} · total ${money(jobTotal(p))} (trabalho ${money(p.labor_value)} + material ${money(matsTotal(p))})</p>
     <div class="fields">
+      ${S.companiesOn ? companyPicker("i_company", p.company_id, "Cobrar de (Bill to)", "Cliente da obra: " + (p.client || "")) : ""}
       <label class="f">Número<input id="i_num" value="${esc(nextInvoiceNumber())}"></label>
       <label class="f">Idioma do PDF<select id="i_lang"><option value="en">English</option><option value="pt">Português</option></select></label>
       <label class="f">Data<input id="i_date" type="date" value="${d0}"></label>
@@ -603,14 +695,18 @@ function openInvoice(p) {
   const close = () => el.remove();
   el.addEventListener("click", e => { if (e.target === el) close(); });
   $("#icancel", el).addEventListener("click", close);
+  if (S.companiesOn) wireCompanyPicker(el, "i_company", "Cliente da obra: " + (p.client || ""));
   $("#invf", el).addEventListener("submit", async e => {
     e.preventDefault();
     const opt = { number: $("#i_num", el).value.trim() || nextInvoiceNumber(), lang: $("#i_lang", el).value,
-      date: $("#i_date", el).value || d0, due: $("#i_due", el).value, detail: $("#i_detail", el).checked, notes: $("#i_notes", el).value.trim() };
+      date: $("#i_date", el).value || d0, due: $("#i_due", el).value, detail: $("#i_detail", el).checked, notes: $("#i_notes", el).value.trim(),
+      company: S.companiesOn ? S.companies.find(c => c.id === $("#i_company", el).value) || null : null };
     $("#igo", el).disabled = true; $("#igo", el).textContent = "Gerando…";
     try {
       await buildInvoicePdf(p, opt);
-      await S.sb.from("projects").update({ invoice_number: opt.number, invoice_date: opt.date }).eq("id", p.id);
+      const upd = { invoice_number: opt.number, invoice_date: opt.date };
+      if (S.companiesOn) upd.company_id = opt.company?.id || null;  // lembra a empresa para a próxima vez
+      await S.sb.from("projects").update(upd).eq("id", p.id);
       close(); toast("Invoice " + opt.number + " gerado"); loadProjects();
     } catch (x) {
       const er = $("#ierr", el); er.textContent = "Não foi possível gerar o PDF: " + x.message; er.hidden = false;
@@ -645,12 +741,16 @@ async function buildInvoicePdf(p, o) {
   // Bill to + meta
   let y = 148;
   doc.setTextColor(...ORANGE); doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.text(T.billTo, M, y);
-  doc.setTextColor(...INK); doc.setFontSize(12); doc.text(p.client || "", M, y + 17);
+  const billCo = o.company;
+  doc.setTextColor(...INK); doc.setFontSize(12); doc.text(doc.splitTextToSize((billCo ? billCo.name : p.client) || "", 250)[0], M, y + 17);
   doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-  const billLines = [p.contact, p.address, p.city, p.phone, p.email].filter(Boolean);
+  const billLines = (billCo ? [billCo.contact, billCo.address, billCo.phone, billCo.email, billCo.tax_id && "Tax ID: " + billCo.tax_id]
+    : [p.contact, p.address, p.city, p.phone, p.email]).filter(Boolean);
   billLines.forEach((l, i) => doc.text(doc.splitTextToSize(l, 250)[0], M, y + 33 + i * 14));
 
-  const meta = [[T.date, fdate(o.date)], [T.due, fdate(o.due)], [T.service, type], [T.site, [p.address, p.city].filter(Boolean).join(", ") || "-"]];
+  const meta = [[T.date, fdate(o.date)], [T.due, fdate(o.due)], [T.service, type]];
+  if (billCo) meta.push([T.client, p.client || "-"]);
+  meta.push([T.site, [p.address, p.city].filter(Boolean).join(", ") || "-"]);
   meta.forEach(([k, v], i) => {
     const yy = y + i * 18;
     doc.setTextColor(...MUTED); doc.setFontSize(9); doc.text(k, W - M - 210, yy);
