@@ -181,3 +181,15 @@ code { background: var(--chip); padding: 1px 5px; border-radius: 4px; font-size:
 .mtable th, .mtable td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left }
 .mtable th { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
 .mtable .r { text-align: right; white-space: nowrap }
+
+/* Cadastro e equipe */
+.login .tabs { justify-self: start }
+.okmsg { color: var(--ok); font-weight: 600; margin: 0 }
+.team { display: grid; gap: 8px }
+.trow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px }
+.tinfo { display: grid; min-width: 0 }
+.tinfo b, .tinfo .meta { overflow-wrap: anywhere }
+.tbtns { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; align-items: center }
+.role-pending { background: var(--warn); color: var(--bg) }
+.role-admin { background: var(--navy); color: var(--bg) }
+.role-blocked { background: var(--danger); color: #fff }
