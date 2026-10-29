@@ -199,3 +199,12 @@ div.f { display: grid; gap: 4px; font-size: .8rem; font-weight: 600; color: var(
 div.f select { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink); font-size: 1rem }
 div.f .btn { text-transform: none; letter-spacing: 0; color: var(--ink); font-size: .95rem }
 .card .co b { color: var(--ink) }
+
+/* Vários tipos de serviço */
+.typepick { display: flex; flex-wrap: wrap; gap: 6px }
+.tp { position: relative; text-transform: none; letter-spacing: 0; cursor: pointer }
+.tp input { position: absolute; opacity: 0; width: 1px; height: 1px; min-height: 0 }
+.tp span { display: inline-block; padding: 8px 12px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); color: var(--ink); font-weight: 500; font-size: .95rem }
+.tp input:checked + span { background: var(--tape); border-color: var(--tape); color: var(--tape-ink); font-weight: 600 }
+.tp input:focus-visible + span { outline: 3px solid var(--tape); outline-offset: 2px }
+.tp-other { flex: 1 1 220px; min-width: 0; width: auto; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink); font-size: 1rem }

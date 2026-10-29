@@ -25,6 +25,9 @@ const money = n => new Intl.NumberFormat(CFG.LOCALE || "en-US", { style: "curren
 const matsOf = p => Array.isArray(p.materials) ? p.materials : [];
 const matsTotal = p => round2(matsOf(p).reduce((s, m) => s + num(m.qty) * num(m.price), 0));
 const jobTotal = p => round2(num(p.labor_value) + matsTotal(p));
+// Vários serviços ficam no mesmo campo, separados por vírgula ("Drywall, Pintura").
+const typesOf = p => String(p?.type || "").split(",").map(t => t.trim()).filter(Boolean);
+const typeChips = p => typesOf(p).map(t => `<span class="chip">${esc(t)}</span>`).join("");
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
 
 function toast(msg) {
@@ -271,7 +274,7 @@ function card(p) {
   return `<button class="card st-${st}" data-id="${esc(p.id)}">
     <div class="cover">${cover ? `<img src="${esc(cover)}" alt="" loading="lazy">` : "Sem fotos ainda"}</div>
     <div class="body">
-      <div class="row"><span class="chip">${esc(STATUS[st])}</span>${p.type ? `<span class="chip">${esc(p.type)}</span>` : ""}</div>
+      <div class="row"><span class="chip">${esc(STATUS[st])}</span>${typeChips(p)}</div>
       <h3>${esc(p.client || "Sem nome")}</h3>
       ${companyOf(p) ? `<div class="meta co">Para: <b>${esc(companyOf(p).name)}</b></div>` : ""}
       <div class="meta">${esc([p.address, p.city].filter(Boolean).join(" · "))}</div>
@@ -298,7 +301,7 @@ function renderDetail() {
     <button class="btn ghost back" id="back">← Todas as obras</button>
     <div class="head">
       <div class="t">
-        <div class="row" style="margin-bottom:6px"><span class="chip">${esc(STATUS[st])}</span>${p.type ? `<span class="chip">${esc(p.type)}</span>` : ""}</div>
+        <div class="row" style="margin-bottom:6px"><span class="chip">${esc(STATUS[st])}</span>${typeChips(p)}</div>
         <h1>${esc(p.client || "Sem nome")}</h1>
       </div>
       <div class="row">
@@ -405,7 +408,13 @@ function openForm(p) {
     <div class="fields">
       <label class="f full">Cliente / nome da obra<input id="f_client" required value="${esc(p.client)}" placeholder="Ex.: Residência Oliveira"></label>
       <label class="f">Cidade<input id="f_city" required value="${esc(p.city)}" list="citylist" placeholder="Ex.: Orlando"></label>
-      <label class="f">Tipo de serviço<select id="f_type">${TYPES.map(t => `<option ${p.type === t ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+      <div class="f full">Tipos de serviço (marque quantos quiser)
+        <div class="typepick" id="f_types">${(() => {
+          const cur = typesOf(p), base = TYPES.filter(t => t !== "Outro");
+          const extra = cur.filter(t => !base.includes(t));
+          return base.map(t => `<label class="tp"><input type="checkbox" value="${esc(t)}" ${cur.includes(t) ? "checked" : ""}><span>${esc(t)}</span></label>`).join("")
+            + `<input id="f_type_other" class="tp-other" placeholder="Outro serviço (ex.: Gesso, Telhado)" value="${esc(extra.join(", "))}" aria-label="Outro serviço">`;
+        })()}</div></div>
       <label class="f full">Endereço<input id="f_address" value="${esc(p.address)}" placeholder="Rua, número, bairro, CEP"></label>
       ${S.companiesOn ? companyPicker("f_company", p.company_id, "Empresa contratante (quem contratou e paga)", "Nenhuma") : ""}
       <label class="f">Contato<input id="f_contact" value="${esc(p.contact)}" placeholder="Nome de quem atende"></label>
@@ -477,7 +486,8 @@ function openForm(p) {
   $("#pf", el).addEventListener("submit", async e => {
     e.preventDefault();
     const v = id => $("#" + id, el).value.trim();
-    const data = { client: v("f_client"), city: v("f_city"), type: v("f_type"), address: v("f_address"), contact: v("f_contact"),
+    const data = { client: v("f_client"), city: v("f_city"), type: [...[...el.querySelectorAll("#f_types input[type=checkbox]:checked")].map(c => c.value),
+        ...v("f_type_other").split(",").map(t => t.trim()).filter(Boolean)].join(", "), address: v("f_address"), contact: v("f_contact"),
       phone: v("f_phone"), email: v("f_email"), start_date: v("f_start") || null, status: v("f_status"), notes: v("f_notes"),
       labor_value: round2(num(v("f_labor"))), materials: readMats() };
     if (S.companiesOn) data.company_id = v("f_company") || null;
@@ -729,7 +739,9 @@ async function buildInvoicePdf(p, o) {
   const fmt = n => new Intl.NumberFormat(T.locale, { style: "currency", currency: CFG.CURRENCY || "USD" }).format(n || 0);
   const fdate = d => d ? new Date(d + "T12:00").toLocaleDateString(T.locale, { year: "numeric", month: "short", day: "2-digit" }) : "-";
   const co = CFG.COMPANY || {};
-  const type = o.lang === "en" ? (TYPE_EN[p.type] || p.type || "Renovation") : (p.type || "Reforma");
+  const list = typesOf(p).map(t => o.lang === "en" ? (TYPE_EN[t] || t) : t);
+  const type = list.length ? (list.length > 1 ? list.slice(0, -1).join(", ") + (o.lang === "en" ? " & " : " e ") + list.at(-1) : list[0])
+    : (o.lang === "en" ? "Renovation" : "Reforma");
   const ORANGE = [255, 87, 34], INK = [22, 32, 43], MUTED = [91, 102, 114];
 
   const doc = new window.jspdf.jsPDF({ unit: "pt", format: "letter" });
