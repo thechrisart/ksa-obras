@@ -95,8 +95,8 @@ function renderLogin(msg = "", mode = "in", ok = "") {
   app.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => renderLogin("", b.dataset.mode)));
   // Sign-up only makes sense once the approval table exists; otherwise a new account would see everything.
   if (S.signupOk === undefined) {
-    S.sb.from("members").select("user_id", { head: true }).then(({ error }) => {
-      S.signupOk = !error; if (!S.signupOk) $(".tabs")?.setAttribute("hidden", "");
+    S.sb.from("members").select("user_id").limit(1).then(({ error, status }) => {
+      S.signupOk = !error && status < 400; if (!S.signupOk) $(".tabs")?.setAttribute("hidden", "");
     });
   } else if (!S.signupOk) $(".tabs").hidden = true;
   $("#lf").addEventListener("submit", async e => {
