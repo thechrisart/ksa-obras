@@ -3,16 +3,21 @@ const STATUS = { orc: "Orçamento", and: "Em andamento", con: "Concluída" };
 const STAGES = { antes: "Antes", durante: "Durante", depois: "Depois" };
 const BUCKET = "obras";
 const MAX_BYTES = 50 * 1024 * 1024;
+const DRIVE_MAX = 500 * 1024 * 1024;
+const CHUNK = 4 * 1024 * 1024;  // múltiplo de 256 KB, exigido pelo Drive
 const SIGN_TTL = 60 * 60 * 24 * 7;
 
 const S = { sb: null, user: null, projects: [], loaded: false, view: "list", pid: null, media: [],
-  q: "", fStatus: "", fCity: "", stage: "durante", busy: false, urls: new Map() };
+  q: "", fStatus: "", fCity: "", stage: "durante", busy: false, urls: new Map(), folders: {} };
 const app = document.getElementById("app");
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmtDate = t => t ? new Date(t).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) : "";
 const fmtTime = t => t ? new Date(t).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-const url = path => S.urls.get(path)?.url || "";
+const isDrive = path => typeof path === "string" && path.startsWith("drive:");
+const driveId = path => path.slice(6);
+const url = (path, sz = "w800") => isDrive(path) ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(driveId(path))}&sz=${sz}` : (S.urls.get(path)?.url || "");
+const fullUrl = path => isDrive(path) ? `https://drive.google.com/file/d/${encodeURIComponent(driveId(path))}/view` : url(path);
 const CFG = window.KSA_CONFIG || {};
 const num = v => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
 const round2 = n => Math.round(n * 100) / 100;
@@ -79,10 +84,47 @@ function renderLogin(msg = "") {
   });
 }
 
+/* ---------- Google Drive ---------- */
+const driveOn = () => !!CFG.DRIVE_URL;
+const folderName = p => [p.client, p.city].filter(Boolean).join(" - ");
+
+async function driveCall(action, body = {}) {
+  const { data } = await S.sb.auth.getSession();
+  const r = await fetch(CFG.DRIVE_URL, { method: "POST", body: JSON.stringify({ action, token: data.session?.access_token, ...body }) });
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || "erro no Google Drive");
+  return j;
+}
+
+async function ensureFolder(p) {
+  if (!driveOn() || !p) return;
+  try {
+    const j = await driveCall("folder", { projectId: p.id, name: folderName(p) });
+    S.folders[p.id] = j.folderUrl;
+    if (S.view === "detail" && S.pid === p.id) { const a = $("#driveLink"); if (a) { a.href = j.folderUrl; a.hidden = false; } }
+  } catch (e) { toast("Google Drive: " + e.message); }
+}
+
+const b64 = blob => new Promise((ok, bad) => {
+  const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(",")[1] || ""); fr.onerror = () => bad(fr.error); fr.readAsDataURL(blob);
+});
+
+async function uploadToDrive(blob, p, stage, fileName, onPart) {
+  const type = blob.type || "application/octet-stream";
+  const { session } = await driveCall("start", { projectId: p.id, name: folderName(p), stage, fileName, mimeType: type, size: blob.size });
+  const parts = Math.max(1, Math.ceil(blob.size / CHUNK));
+  for (let k = 0, start = 0; k < parts; k++, start += CHUNK) {
+    onPart?.(k + 1, parts);
+    const j = await driveCall("chunk", { session, start, total: blob.size, data: await b64(blob.slice(start, start + CHUNK)) });
+    if (j.done) return j.fileId;
+  }
+  throw new Error("o Drive não confirmou o arquivo");
+}
+
 /* ---------- data ---------- */
 async function sign(paths) {
   const now = Date.now();
-  const need = [...new Set(paths.filter(p => p && !(S.urls.get(p)?.exp > now + 3600e3)))];
+  const need = [...new Set(paths.filter(p => p && !isDrive(p) && !(S.urls.get(p)?.exp > now + 3600e3)))];
   if (!need.length) return;
   const { data, error } = await S.sb.storage.from(BUCKET).createSignedUrls(need, SIGN_TTL);
   if (error) return;
@@ -171,6 +213,7 @@ function card(p) {
 function openDetail(id) {
   S.view = "detail"; S.pid = id; S.media = [];
   renderDetail(); loadMedia(); window.scrollTo(0, 0);
+  if (driveOn() && !S.folders[id]) ensureFolder(S.projects.find(p => p.id === id));
 }
 function goList() { S.view = "list"; S.pid = null; S.media = []; renderList(); window.scrollTo(0, 0); }
 
@@ -188,7 +231,10 @@ function renderDetail() {
         <div class="row" style="margin-bottom:6px"><span class="chip">${esc(STATUS[st])}</span>${p.type ? `<span class="chip">${esc(p.type)}</span>` : ""}</div>
         <h1>${esc(p.client || "Sem nome")}</h1>
       </div>
-      <button class="btn" id="edit">Editar dados</button>
+      <div class="row">
+        ${driveOn() ? `<a class="btn" id="driveLink" target="_blank" rel="noopener" href="${esc(S.folders[p.id] || "#")}" ${S.folders[p.id] ? "" : "hidden"}>Pasta no Drive ↗</a>` : ""}
+        <button class="btn" id="edit">Editar dados</button>
+      </div>
     </div>
     <div class="info">
       <div><div class="k">Cidade</div><div class="v">${esc(p.city || "—")}</div></div>
@@ -225,7 +271,7 @@ function renderDetail() {
         <button class="btn" id="bLib" ${S.busy ? "disabled" : ""}>Escolher arquivos</button>
         <span class="progress" id="prog">${S.busy ? esc(S.busy) : ""}</span>
       </div>
-      <div class="upl" style="padding-top:0"><span class="hint">Os envios entram na etapa marcada em laranja. Vídeos até 50 MB (cerca de 1 minuto no celular).</span></div>
+      <div class="upl" style="padding-top:0"><span class="hint">${driveOn() ? "Os envios vão para a pasta da obra no Google Drive, na etapa marcada em laranja. Vídeos até 500 MB." : "Os envios entram na etapa marcada em laranja. Vídeos até 50 MB (cerca de 1 minuto no celular)."}</span></div>
       ${Object.entries(STAGES).map(([k, v]) => {
         const items = byStage(k);
         return `<div class="stage"><h3><span class="chip" style="background:${k === "antes" ? "var(--warn)" : k === "depois" ? "var(--ok)" : "var(--navy)"};color:var(--bg)">${v}</span><span class="n">${items.length} ${items.length === 1 ? "registro" : "registros"}</span></h3>
@@ -247,7 +293,8 @@ function renderDetail() {
 function thumb(m) {
   const isVid = m.kind === "video";
   return `<button class="thumb" data-id="${esc(m.id)}" aria-label="${esc(m.caption || (isVid ? "Vídeo" : "Foto"))}">
-    ${isVid ? `<video src="${esc(url(m.path))}#t=0.1" preload="metadata" muted playsinline></video><span class="play">▶</span>`
+    ${isVid && isDrive(m.path) ? `<img src="${esc(url(m.path))}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span class="play">▶</span>`
+      : isVid ? `<video src="${esc(url(m.path))}#t=0.1" preload="metadata" muted playsinline></video><span class="play">▶</span>`
       : `<img src="${esc(url(m.path))}" alt="" loading="lazy">`}
     <span class="tag">${esc(m.caption ? m.caption.slice(0, 24) : fmtDate(m.created_at))}</span></button>`;
 }
@@ -346,6 +393,7 @@ function openForm(p) {
       const { error } = await S.sb.from("projects").update({ ...data, updated_at: new Date().toISOString() }).eq("id", p.id);
       if (error) { $("#fsave", el).disabled = false; return err("Não foi possível salvar: " + error.message); }
       close(); toast("Obra atualizada"); loadProjects();
+      if (driveOn() && folderName(p) !== folderName(data)) ensureFolder({ ...p, ...data });
     } else {
       const { data: row, error } = await S.sb.from("projects").insert({ ...data, created_by: S.user.id }).select().single();
       if (error) { $("#fsave", el).disabled = false; return err("Não foi possível salvar: " + error.message); }
@@ -357,10 +405,11 @@ function openForm(p) {
 
 async function deleteProject(id) {
   const { data } = await S.sb.from("media").select("path").eq("project_id", id);
-  const paths = (data || []).map(m => m.path);
+  const paths = (data || []).map(m => m.path).filter(p => !isDrive(p));
   for (let i = 0; i < paths.length; i += 100) await S.sb.storage.from(BUCKET).remove(paths.slice(i, i + 100));
   const { error } = await S.sb.from("projects").delete().eq("id", id);
   if (error) throw error;
+  if (driveOn()) driveCall("trashFolder", { projectId: id }).catch(e => toast("Google Drive: " + e.message));
 }
 
 /* ---------- uploads ---------- */
@@ -389,20 +438,34 @@ function extFor(blob, name) {
 }
 
 async function uploadFiles(files) {
-  const pid = S.pid, stage = S.stage;
+  const pid = S.pid, stage = S.stage, p = S.projects.find(x => x.id === pid);
   let ok = 0; const fail = [];
   for (let i = 0; i < files.length; i++) {
     S.busy = `Enviando ${i + 1} de ${files.length}…`; if (S.view === "detail") renderDetail();
     const f = files[i];
     try {
       const blob = await shrink(f);
-      if (blob.size > MAX_BYTES) throw new Error("maior que 50 MB");
-      const path = `${pid}/${uid()}.${extFor(blob, f.name || "")}`;
-      const up = await S.sb.storage.from(BUCKET).upload(path, blob, { contentType: blob.type || f.type || "application/octet-stream" });
-      if (up.error) throw up.error;
       const kind = (blob.type || f.type || "").startsWith("video") ? "video" : "image";
+      let path;
+      if (driveOn()) {
+        if (blob.size > DRIVE_MAX) throw new Error("maior que 500 MB");
+        const stamp = new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "h");
+        const fileName = `${STAGES[stage]} ${stamp} ${uid().slice(0, 4)}.${extFor(blob, f.name || "")}`;
+        const fileId = await uploadToDrive(blob, p, stage, fileName, (k, n) => {
+          if (n > 1) { S.busy = `Enviando ${i + 1} de ${files.length} · ${Math.round(k / n * 100)}%`; const pr = $("#prog"); if (pr) pr.textContent = S.busy; }
+        });
+        path = "drive:" + fileId;
+      } else {
+        if (blob.size > MAX_BYTES) throw new Error("maior que 50 MB");
+        path = `${pid}/${uid()}.${extFor(blob, f.name || "")}`;
+        const up = await S.sb.storage.from(BUCKET).upload(path, blob, { contentType: blob.type || f.type || "application/octet-stream" });
+        if (up.error) throw up.error;
+      }
       const { error } = await S.sb.from("media").insert({ project_id: pid, path, kind, stage, caption: "", name: f.name || "", size: blob.size, created_by: S.user.id });
-      if (error) { await S.sb.storage.from(BUCKET).remove([path]); throw error; }
+      if (error) {
+        if (isDrive(path)) driveCall("trash", { fileId: driveId(path) }).catch(() => {}); else await S.sb.storage.from(BUCKET).remove([path]);
+        throw error;
+      }
       ok++;
     } catch (e) { fail.push(`${f.name || "arquivo"}: ${e.message || "falhou"}`); }
   }
@@ -433,13 +496,14 @@ function openViewer(mid) {
 
   function draw() {
     const m = S.media[idx]; if (!m) return close();
-    const isVid = m.kind === "video", src = url(m.path);
+    const isVid = m.kind === "video", src = url(m.path, "w2400");
     el.innerHTML = `
       <div class="vt"><span class="when">${idx + 1} / ${S.media.length} · ${esc(fmtTime(m.created_at))}</span><span class="spacer"></span>
-        <a class="btn" href="${esc(src)}" target="_blank" rel="noopener">Abrir original</a>
+        <a class="btn" href="${esc(fullUrl(m.path))}" target="_blank" rel="noopener">${isDrive(m.path) ? "Abrir no Drive" : "Abrir original"}</a>
         <button class="btn" id="vclose">Fechar</button></div>
       <div class="stagebox">
-        ${isVid ? `<video src="${esc(src)}" controls playsinline></video>` : `<img src="${esc(src)}" alt="${esc(m.caption)}">`}
+        ${isVid && isDrive(m.path) ? `<iframe src="https://drive.google.com/file/d/${esc(encodeURIComponent(driveId(m.path)))}/preview" allow="autoplay; fullscreen" title="Vídeo"></iframe>`
+          : isVid ? `<video src="${esc(src)}" controls playsinline></video>` : `<img src="${esc(src)}" alt="${esc(m.caption)}">`}
         ${S.media.length > 1 ? `<button class="nav l" id="vprev" aria-label="Anterior">‹</button><button class="nav r" id="vnext" aria-label="Próximo">›</button>` : ""}
       </div>
       <div class="vb">
@@ -456,6 +520,10 @@ function openViewer(mid) {
       const caption = $("#vcap", el).value.trim(), stage = $("#vstage", el).value;
       const { error } = await S.sb.from("media").update({ caption, stage }).eq("id", m.id);
       if (error) return toast("Não foi possível salvar: " + error.message);
+      if (isDrive(m.path) && stage !== m.stage) {
+        const p = S.projects.find(x => x.id === S.pid);
+        driveCall("move", { fileId: driveId(m.path), projectId: S.pid, name: folderName(p), stage }).catch(e => toast("Google Drive: " + e.message));
+      }
       Object.assign(m, { caption, stage }); toast("Salvo");
       await syncProjectSummary(S.pid); renderDetail();
     });
@@ -464,7 +532,8 @@ function openViewer(mid) {
       this.disabled = true;
       const { error } = await S.sb.from("media").delete().eq("id", m.id);
       if (error) { this.disabled = false; return toast("Não foi possível excluir: " + error.message); }
-      await S.sb.storage.from(BUCKET).remove([m.path]);
+      if (isDrive(m.path)) driveCall("trash", { fileId: driveId(m.path) }).catch(e => toast("Google Drive: " + e.message));
+      else await S.sb.storage.from(BUCKET).remove([m.path]);
       toast("Registro excluído");
       S.media = S.media.filter(x => x.id !== m.id);
       await syncProjectSummary(S.pid); renderDetail();

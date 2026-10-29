@@ -181,3 +181,4 @@ code { background: var(--chip); padding: 1px 5px; border-radius: 4px; font-size:
 .mtable th, .mtable td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left }
 .mtable th { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
 .mtable .r { text-align: right; white-space: nowrap }
+.viewer .stagebox iframe { width: min(100%, 960px); height: 100%; border: 0; background: #000 }
