@@ -208,3 +208,25 @@ div.f .btn { text-transform: none; letter-spacing: 0; color: var(--ink); font-si
 .tp input:checked + span { background: var(--tape); border-color: var(--tape); color: var(--tape-ink); font-weight: 600 }
 .tp input:focus-visible + span { outline: 3px solid var(--tape); outline-offset: 2px }
 .tp-other { flex: 1 1 220px; min-width: 0; width: auto; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink); font-size: 1rem }
+
+/* Resumo financeiro por mês */
+.summary { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 12px; margin-bottom: 8px }
+.sumhead { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap }
+.sumhead h2 { margin: 0; font-family: var(--display); font-size: 1.3rem; text-transform: uppercase; letter-spacing: .04em }
+.sumhead select { width: auto }
+.sumnums { display: grid; grid-template-columns: 2fr 1fr 1fr .6fr; gap: 10px; font-variant-numeric: tabular-nums }
+.sumnums div { display: grid; gap: 2px; min-width: 0 }
+.sumnums span { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600 }
+.sumnums b { font-size: 1.15rem; overflow-wrap: anywhere }
+.sumnums .big b { font-family: var(--display); font-size: clamp(1.8rem, 6vw, 2.4rem); line-height: 1; color: var(--tape) }
+@media (max-width: 560px) { .sumnums { grid-template-columns: 1fr 1fr } .sumnums .big { grid-column: 1 / -1 } }
+.mtabs { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin }
+.mtabs button { flex: 1 0 64px; position: relative; display: grid; justify-items: center; gap: 2px; padding: 8px 4px 6px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--bg); color: var(--ink); font: 600 .9rem var(--body); cursor: pointer; overflow: hidden; font-variant-numeric: tabular-nums }
+.mtabs button small { font-weight: 500; font-size: .72rem; color: var(--muted); position: relative }
+.mtabs button i { position: absolute; left: 0; right: 0; bottom: 0; background: color-mix(in srgb, var(--tape) 22%, transparent); pointer-events: none }
+.mtabs button.zero { color: var(--muted) }
+.mtabs button[aria-selected="true"] { background: var(--tape); border-color: var(--tape); color: var(--tape-ink) }
+.mtabs button[aria-selected="true"] small { color: var(--tape-ink) }
+.mtabs button[aria-selected="true"] i { display: none }
+.mtabs button:focus-visible { outline: 3px solid var(--tape); outline-offset: 2px }

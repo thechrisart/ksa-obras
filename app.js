@@ -8,7 +8,7 @@ const CHUNK = 4 * 1024 * 1024;  // múltiplo de 256 KB, exigido pelo Drive
 const SIGN_TTL = 60 * 60 * 24 * 7;
 
 const S = { sb: null, user: null, projects: [], loaded: false, view: "list", pid: null, media: [],
-  q: "", fStatus: "", fCity: "", stage: "durante", busy: false, urls: new Map(), folders: {}, companies: [], companiesOn: false, fCompany: "" };
+  q: "", fStatus: "", fCity: "", stage: "durante", busy: false, urls: new Map(), folders: {}, companies: [], companiesOn: false, fCompany: "", year: new Date().getFullYear(), month: -1 };
 const app = document.getElementById("app");
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -28,6 +28,11 @@ const jobTotal = p => round2(num(p.labor_value) + matsTotal(p));
 // Vários serviços ficam no mesmo campo, separados por vírgula ("Drywall, Pintura").
 const typesOf = p => String(p?.type || "").split(",").map(t => t.trim()).filter(Boolean);
 const typeChips = p => typesOf(p).map(t => `<span class="chip">${esc(t)}</span>`).join("");
+const MONTHS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+const MONTHS_FULL = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+// Mês da obra: data de início, ou a data do cadastro quando não houver início.
+const jobDate = p => p.start_date ? new Date(p.start_date + "T12:00") : new Date(p.created_at);
+const money0 = n => new Intl.NumberFormat(CFG.LOCALE || "en-US", { style: "currency", currency: CFG.CURRENCY || "USD", maximumFractionDigits: 0 }).format(n || 0);
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
 
 function toast(msg) {
@@ -224,11 +229,19 @@ function renderList() {
   if (!S.loaded) return;
   const cities = [...new Set(S.projects.map(p => (p.city || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   const q = S.q.trim().toLowerCase();
-  const list = S.projects.filter(p =>
+  const base = S.projects.filter(p =>
     (!S.fStatus || p.status === S.fStatus) &&
     (!S.fCity || (p.city || "").trim() === S.fCity) &&
     (!S.fCompany || (S.fCompany === "-" ? !p.company_id : p.company_id === S.fCompany)) &&
     (!q || [p.client, p.city, p.address, p.contact, p.phone, p.type].join(" ").toLowerCase().includes(q)));
+  const years = [...new Set([new Date().getFullYear(), ...S.projects.map(p => jobDate(p).getFullYear())])].sort((a, b) => b - a);
+  const inYear = base.filter(p => jobDate(p).getFullYear() === S.year);
+  const byMonth = MONTHS.map((_, m) => inYear.filter(p => jobDate(p).getMonth() === m));
+  const list = S.month < 0 ? inYear : byMonth[S.month];
+  const sum = arr => ({ net: round2(arr.reduce((t, p) => t + num(p.labor_value), 0)), mat: round2(arr.reduce((t, p) => t + matsTotal(p), 0)),
+    gross: round2(arr.reduce((t, p) => t + jobTotal(p), 0)), n: arr.length });
+  const tot = sum(list), monthNet = byMonth.map(a => sum(a).net), maxNet = Math.max(1, ...monthNet);
+  const period = S.month < 0 ? `Ano de ${S.year}` : `${MONTHS_FULL[S.month]} de ${S.year}`;
   const count = k => S.projects.filter(p => p.status === k).length;
   const totalMedia = S.projects.reduce((n, p) => n + (p.media_count || 0), 0);
 
@@ -252,6 +265,23 @@ function renderList() {
         ${S.companies.map(c => `<option value="${esc(c.id)}" ${S.fCompany === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
         <option value="-" ${S.fCompany === "-" ? "selected" : ""}>Sem empresa</option></select>` : ""}
     </div>
+    <section class="summary" aria-label="Resumo financeiro">
+      <div class="sumhead">
+        <h2>Resumo · ${esc(period)}</h2>
+        <select id="fYear" aria-label="Ano">${years.map(y => `<option ${y === S.year ? "selected" : ""}>${y}</option>`).join("")}</select>
+      </div>
+      <div class="sumnums">
+        <div class="big"><span>Valor líquido (mão de obra)</span><b>${money(tot.net)}</b></div>
+        <div><span>Total faturado</span><b>${money(tot.gross)}</b></div>
+        <div><span>Material</span><b>${money(tot.mat)}</b></div>
+        <div><span>Obras</span><b>${tot.n}</b></div>
+      </div>
+      <div class="mtabs" role="tablist" aria-label="Meses">
+        <button role="tab" data-month="-1" aria-selected="${S.month < 0}">Ano<small>${money0(sum(inYear).net)}</small></button>
+        ${MONTHS.map((m, i) => `<button role="tab" data-month="${i}" aria-selected="${S.month === i}" ${byMonth[i].length ? "" : 'class="zero"'}>
+          ${m}<i style="height:${Math.round(monthNet[i] / maxNet * 100)}%"></i><small>${byMonth[i].length ? money0(monthNet[i]) : "—"}</small></button>`).join("")}
+      </div>
+    </section>
     <div class="stats">
       <span><b>${S.projects.length}</b> obras</span>
       <span><span class="dot" style="background:var(--navy)"></span> <b>${count("and")}</b> em andamento</span>
@@ -260,12 +290,14 @@ function renderList() {
       <span><b>${totalMedia}</b> fotos e vídeos</span>
     </div>
     ${list.length ? `<div class="grid">${list.map(card).join("")}</div>`
-      : `<div class="empty"><h2>Nada encontrado</h2><p>Nenhuma obra combina com a busca ou os filtros.</p></div>`}`;
+      : `<div class="empty"><h2>Nenhuma obra em ${esc(period.toLowerCase())}</h2><p>Escolha outro mês ou ano, ou mude a busca e os filtros.</p></div>`}`;
 
   $("#q").addEventListener("input", e => { S.q = e.target.value; const pos = e.target.selectionStart; renderList(); const n = $("#q"); n.focus(); n.setSelectionRange(pos, pos); });
   $("#fStatus").addEventListener("change", e => { S.fStatus = e.target.value; renderList(); });
   $("#fCity").addEventListener("change", e => { S.fCity = e.target.value; renderList(); });
   $("#fCompany")?.addEventListener("change", e => { S.fCompany = e.target.value; renderList(); });
+  $("#fYear").addEventListener("change", e => { S.year = +e.target.value; renderList(); });
+  app.querySelectorAll("[data-month]").forEach(b => b.addEventListener("click", () => { S.month = +b.dataset.month; renderList(); }));
   app.querySelectorAll(".card").forEach(c => c.addEventListener("click", () => openDetail(c.dataset.id)));
 }
 
